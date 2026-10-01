@@ -31,12 +31,11 @@
         <label class="text-xs text-slate-500">Tracking (código de barras)</label>
         <input id="fTracking" class="w-full border rounded-lg px-3 py-2 font-mono">
       </div>
-      <div class="relative">
+      <div>
         <label class="text-xs text-slate-500">Cliente (casillero / nombre)</label>
-        <input id="fClientSearch" class="w-full border rounded-lg px-3 py-2" placeholder="Enter para buscar (25 → H-000025)">
+        <input id="fClientSearch" class="w-full border rounded-lg px-3 py-2" placeholder="Escribe y presiona Enter (25 → H-000025)">
         <input type="hidden" id="fClientId">
-        <div id="clientPicked" class="text-sm mt-1 text-emerald-700 hidden"></div>
-        <div id="clientResults" class="absolute left-0 right-0 bg-white border rounded-lg shadow mt-1 max-h-48 overflow-y-auto hidden z-10 text-sm"></div>
+        <div id="clientPicked" class="text-sm mt-1 hidden"></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="text-xs text-slate-500">Contenido</label><input id="fContent" class="w-full border rounded-lg px-3 py-2"></div>
@@ -108,8 +107,10 @@ $('btnCapture').onclick = async () => {
   if(r.supplier) $('fSupplier').value=r.supplier;
   $('capMsg').textContent='Tracking: '+(r.tracking||'—')+(r.ai_error?(' · IA: '+r.ai_error):'');
   const m=r.client_matches||[];
-  if(m.length===1) pickClient(m[0]); else if(m.length>1) showResults(m);
-  else if(r.casillero||r.recipient_name) $('fClientSearch').value=r.casillero||r.recipient_name;
+  const q=(r.casillero||'').replace(/\D/g,'');
+  const pick = chooseMatch(m, q);
+  if(pick) pickClient(pick);
+  else if(r.casillero||r.recipient_name){ $('fClientSearch').value=r.casillero||r.recipient_name; $('fClientSearch').focus(); }
 };
 
 $('btnWeight').onclick = async () => {
@@ -119,17 +120,24 @@ $('btnWeight').onclick = async () => {
   else $('capMsg').textContent='Balanza: '+(r.message||'error');
 };
 
-function showResults(rows){
-  const box=$('clientResults'); box.innerHTML='';
-  rows.forEach(c=>{ const d=document.createElement('div'); d.className='px-3 py-2 hover:bg-slate-100 cursor-pointer';
-    d.textContent=(c.client_code||'')+' · '+c.name; d.onclick=()=>pickClient(c); box.appendChild(d); });
-  box.classList.toggle('hidden', !rows.length);
+// Elige la mejor coincidencia: exacta por dígitos del casillero; si no, única; si no, ninguna.
+function chooseMatch(rows, qDigits){
+  if(!rows||!rows.length) return null;
+  if(qDigits){
+    const ex = rows.find(c=> String(c.client_code||'').replace(/\D/g,'').replace(/^0+/,'') === qDigits.replace(/^0+/,''));
+    if(ex) return ex;
+  }
+  return rows.length===1 ? rows[0] : null;
 }
-function pickClient(c){ $('fClientId').value=c.id; $('clientPicked').textContent='✓ '+c.client_code+' · '+c.name; $('clientPicked').classList.remove('hidden'); $('clientResults').classList.add('hidden'); $('fClientSearch').value=''; }
+function pickClient(c){ $('fClientId').value=c.id; $('clientPicked').textContent='✓ '+c.client_code+' · '+c.name; $('clientPicked').className='text-sm mt-1 text-emerald-700'; $('fClientSearch').value=''; }
 $('fClientSearch').addEventListener('keydown', async e=>{ if(e.key!=='Enter')return; e.preventDefault();
   const q=$('fClientSearch').value.trim(); if(!q)return;
+  $('clientPicked').textContent='Buscando…'; $('clientPicked').className='text-sm mt-1 text-slate-400'; $('clientPicked').classList.remove('hidden');
   const r=await jget('/api/clients/search?q='+encodeURIComponent(q)); const rows=(r&&r.data)||[];
-  if(rows.length===1) pickClient(rows[0]); else showResults(rows);
+  const pick = chooseMatch(rows, q.replace(/\D/g,''));
+  if(pick){ pickClient(pick); }
+  else if(rows.length>1){ $('clientPicked').textContent='⚠ Varios coinciden — escribe el casillero completo'; $('clientPicked').className='text-sm mt-1 text-amber-600'; }
+  else { $('clientPicked').textContent='✗ Cliente no encontrado'; $('clientPicked').className='text-sm mt-1 text-rose-600'; }
 });
 
 $('btnSubmit').onclick = async () => {
