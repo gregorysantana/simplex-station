@@ -68,9 +68,11 @@ def _prompt(prefix='H'):
     return (
         "Eres un asistente que lee etiquetas de envíos de un courier. "
         "Devuelve SOLO un JSON con estas claves (cadena vacía si no aparece): "
-        '{"recipient_name":"", "casillero":"", "content":"", "supplier":""}.\n'
+        '{"recipient_name":"", "casillero":"", "content":"", "supplier":"", "tracking":""}.\n'
         f"- casillero: código de MEMBRESÍA del cliente, normalmente empieza con '{prefix}' seguido de números "
         f"(ej. {prefix}-000025, {prefix}000025, {prefix} 25). Es lo que más se parezca a ese formato en la etiqueta.\n"
+        "- tracking: número de rastreo alfanumérico largo, impreso normalmente JUNTO o ENCIMA del código de barras "
+        "(ej. TBA303..., 1Z..., 9400..., 420...). Si no lo ves, déjalo vacío.\n"
         "- NO confundas el casillero con: el ZIP code (ej. 'FL 33166', '33166', 'FL 33195', '33195'), "
         "ni con la dirección del almacén en Miami (ej. '8338 NW 66th Street', números como 8338/83344), "
         "ni con el teléfono. Esos NO son el casillero.\n"
