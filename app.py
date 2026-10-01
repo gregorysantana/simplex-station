@@ -15,7 +15,7 @@ CFG = {k: os.getenv(k, '') for k in (
     'SIMPLEX_URL', 'STATION_TOKEN', 'CAMERA_INDEX', 'AI_MODE',
     'GEMINI_API_KEY', 'GEMINI_MODEL', 'OPENAI_API_KEY', 'OPENAI_MODEL',
     'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'SCALE_VENDOR_ID', 'SCALE_PRODUCT_ID',
-    'LABEL_PRINTER', 'PORT', 'CASILLERO_PREFIX')}
+    'LABEL_PRINTER', 'PORT', 'CASILLERO_PREFIX', 'CASILLERO_PAD')}
 
 app = Flask(__name__)
 sx = Simplex(CFG['SIMPLEX_URL'] or 'https://simplex.do', CFG['STATION_TOKEN'])
@@ -49,7 +49,11 @@ def capture():
         return jsonify(ok=False, message='sin imagen (permite la cámara en el navegador)')
     import re
     prefix = CFG.get('CASILLERO_PREFIX') or 'H'
-    label = vision.read_label(fr, CFG['AI_MODE'] or 'offline', CFG, prefix)
+    try:
+        pad = int(CFG.get('CASILLERO_PAD') or 6)
+    except Exception:
+        pad = 6
+    label = vision.read_label(fr, CFG['AI_MODE'] or 'offline', CFG, prefix, pad)
     # Tracking: primero el código de barras; si no se leyó, el alfanumérico junto al barcode (IA).
     barcode = vision.decode_barcode(fr)
     ai_track = re.sub(r'[^A-Za-z0-9]', '', str(label.get('tracking', ''))).upper()

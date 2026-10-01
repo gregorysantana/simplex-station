@@ -64,13 +64,15 @@ def decode_barcode(bgr_image):
 
 
 # ---- IA en la nube: devuelve dict estructurado ----
-def _prompt(prefix='H'):
+def _prompt(prefix='H', pad=6):
     return (
-        "Eres un asistente que lee etiquetas de envíos de un courier. "
+        "Eres un asistente que lee etiquetas de envíos de un courier. Lee con MÁXIMA precisión. "
         "Devuelve SOLO un JSON con estas claves (cadena vacía si no aparece): "
         '{"recipient_name":"", "casillero":"", "content":"", "supplier":"", "tracking":""}.\n'
-        f"- casillero: código de MEMBRESÍA del cliente, normalmente empieza con '{prefix}' seguido de números "
-        f"(ej. {prefix}-000025, {prefix}000025, {prefix} 25). Es lo que más se parezca a ese formato en la etiqueta.\n"
+        f"- casillero: código de MEMBRESÍA del cliente. Empieza con '{prefix}' y tiene EXACTAMENTE {pad} dígitos "
+        f"(con ceros a la izquierda), ej. {prefix}-000025. Lee los {pad} dígitos UNO POR UNO, no omitas ni inventes "
+        "ninguno; si un dígito está borroso elige el más probable pero mantén la cantidad correcta de dígitos. "
+        "No lo confundas con códigos parecidos.\n"
         "- tracking: número de rastreo alfanumérico largo, impreso normalmente JUNTO o ENCIMA del código de barras "
         "(ej. TBA303..., 1Z..., 9400..., 420...). Si no lo ves, déjalo vacío.\n"
         "- NO confundas el casillero con: el ZIP code (ej. 'FL 33166', '33166', 'FL 33195', '33195'), "
@@ -118,10 +120,10 @@ def _parse_json(text):
     except Exception:
         return {}
 
-def read_label_ai(bgr_image, mode, keys, prefix='H'):
+def read_label_ai(bgr_image, mode, keys, prefix='H', pad=6):
     """mode: gemini|openai|claude. keys: dict con las API keys/modelos."""
     b64 = _img_to_jpeg_b64(bgr_image)
-    prompt = _prompt(prefix)
+    prompt = _prompt(prefix, pad)
     try:
         if mode == 'gemini':
             import google.generativeai as genai
@@ -180,11 +182,11 @@ def read_label_offline(bgr_image):
         return {'_error': str(e)}
 
 
-def read_label(bgr_image, mode, keys, prefix='H'):
+def read_label(bgr_image, mode, keys, prefix='H', pad=6):
     """Online primero; si falla o es offline, OCR local. Normaliza el casillero."""
     data = {}
     if mode in ('gemini', 'openai', 'claude'):
-        data = read_label_ai(bgr_image, mode, keys, prefix)
+        data = read_label_ai(bgr_image, mode, keys, prefix, pad)
         if not data or data.get('_error'):
             off = read_label_offline(bgr_image)
             if data.get('_error'):

@@ -75,7 +75,9 @@ async function listCams(){
 async function startCam(deviceId){
   if(stream) stream.getTracks().forEach(t=>t.stop());
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: deviceId?{deviceId:{exact:deviceId}}:{facingMode:'environment'}, audio:false });
+    const vc = { width:{ideal:1920}, height:{ideal:1080} };
+    if(deviceId) vc.deviceId={exact:deviceId}; else vc.facingMode='environment';
+    stream = await navigator.mediaDevices.getUserMedia({ video: vc, audio:false });
     $('cam').srcObject = stream;
     $('capMsg').textContent = 'Cámara lista';
   } catch(e){ $('capMsg').textContent = 'No se pudo abrir la cámara: '+e.message; }
@@ -87,7 +89,7 @@ function grabFrame(){
   if(!v.videoWidth) return null;
   c.width=v.videoWidth; c.height=v.videoHeight;
   c.getContext('2d').drawImage(v,0,0);
-  return c.toDataURL('image/jpeg',0.9);
+  return c.toDataURL('image/jpeg',0.97);
 }
 
 async function loadContainers(){
