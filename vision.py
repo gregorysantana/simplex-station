@@ -64,13 +64,43 @@ def decode_barcode(bgr_image):
 
 
 # ---- IA en la nube: devuelve dict estructurado ----
-_PROMPT = (
-    "Eres un asistente que lee etiquetas de paquetes de un courier. "
-    "Devuelve SOLO un JSON con estas claves (usa cadenas vacías si no aparece): "
-    '{"recipient_name":"", "casillero":"", "content":"", "supplier":""}. '
-    "El casillero es un código de membresía tipo H-000025 o similar (NO es el ZIP ni el teléfono). "
-    "El nombre es el destinatario (consignatario). No inventes datos."
-)
+def _prompt(prefix='H'):
+    return (
+        "Eres un asistente que lee etiquetas de envíos de un courier. "
+        "Devuelve SOLO un JSON con estas claves (cadena vacía si no aparece): "
+        '{"recipient_name":"", "casillero":"", "content":"", "supplier":""}.\n'
+        f"- casillero: código de MEMBRESÍA del cliente, normalmente empieza con '{prefix}' seguido de números "
+        f"(ej. {prefix}-000025, {prefix}000025, {prefix} 25). Es lo que más se parezca a ese formato en la etiqueta.\n"
+        "- NO confundas el casillero con: el ZIP code (ej. 'FL 33166', '33166', 'FL 33195', '33195'), "
+        "ni con la dirección del almacén en Miami (ej. '8338 NW 66th Street', números como 8338/83344), "
+        "ni con el teléfono. Esos NO son el casillero.\n"
+        "- recipient_name: el destinatario/consignatario (la persona a quien va el paquete).\n"
+        "- content: descripción de la mercancía si aparece. supplier: remitente/tienda si aparece.\n"
+        "No inventes datos. Si dudas del casillero, deja la mejor coincidencia al formato de membresía."
+    )
+
+# ZIPs y números de dirección a excluir como casillero.
+_ZIP_RE = re.compile(r'\b(33166|33195|33172|33122)\b')
+_ADDR_RE = re.compile(r'\b(8338\d*|833\d{2,})\b')
+
+def clean_casillero(value, prefix='H', text=''):
+    """Normaliza/encuentra el casillero: prefijo+dígitos, excluyendo ZIP/dirección."""
+    cand = (value or '').strip().upper()
+    pfx = prefix.upper().rstrip('-')
+    # 1) si el valor ya trae el prefijo, extrae prefijo+dígitos
+    m = re.search(rf'{re.escape(pfx)}\s*-?\s*(\d{{2,7}})', cand)
+    if m:
+        return f"{pfx}-{m.group(1)}"
+    # 2) si es solo dígitos y no es ZIP/dirección, úsalo
+    d = re.sub(r'\D', '', cand)
+    if d and not _ZIP_RE.search(d) and not _ADDR_RE.search(d) and len(d) <= 7:
+        return f"{pfx}-{d}"
+    # 3) buscar en el texto crudo el mejor candidato con prefijo
+    if text:
+        m2 = re.search(rf'{re.escape(pfx)}\s*-?\s*(\d{{2,7}})', text.upper())
+        if m2:
+            return f"{pfx}-{m2.group(1)}"
+    return ''
 
 def _img_to_jpeg_b64(bgr_image):
     import cv2
@@ -86,15 +116,16 @@ def _parse_json(text):
     except Exception:
         return {}
 
-def read_label_ai(bgr_image, mode, keys):
+def read_label_ai(bgr_image, mode, keys, prefix='H'):
     """mode: gemini|openai|claude. keys: dict con las API keys/modelos."""
     b64 = _img_to_jpeg_b64(bgr_image)
+    prompt = _prompt(prefix)
     try:
         if mode == 'gemini':
             import google.generativeai as genai
             genai.configure(api_key=keys['GEMINI_API_KEY'])
             model = genai.GenerativeModel(keys.get('GEMINI_MODEL') or 'gemini-2.5-flash')
-            resp = model.generate_content([_PROMPT, {'mime_type': 'image/jpeg', 'data': base64.b64decode(b64)}])
+            resp = model.generate_content([prompt, {'mime_type': 'image/jpeg', 'data': base64.b64decode(b64)}])
             return _parse_json(resp.text)
         if mode == 'openai':
             from openai import OpenAI
@@ -102,7 +133,7 @@ def read_label_ai(bgr_image, mode, keys):
             resp = cli.chat.completions.create(
                 model=keys.get('OPENAI_MODEL') or 'gpt-4.1',
                 messages=[{'role': 'user', 'content': [
-                    {'type': 'text', 'text': _PROMPT},
+                    {'type': 'text', 'text': prompt},
                     {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64}'}},
                 ]}])
             return _parse_json(resp.choices[0].message.content)
@@ -112,7 +143,7 @@ def read_label_ai(bgr_image, mode, keys):
             resp = cli.messages.create(
                 model=keys.get('ANTHROPIC_MODEL') or 'claude-sonnet-5', max_tokens=300,
                 messages=[{'role': 'user', 'content': [
-                    {'type': 'text', 'text': _PROMPT},
+                    {'type': 'text', 'text': prompt},
                     {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': b64}},
                 ]}])
             return _parse_json(resp.content[0].text)
@@ -147,10 +178,19 @@ def read_label_offline(bgr_image):
         return {'_error': str(e)}
 
 
-def read_label(bgr_image, mode, keys):
-    """Online primero; si falla o es offline, OCR local."""
+def read_label(bgr_image, mode, keys, prefix='H'):
+    """Online primero; si falla o es offline, OCR local. Normaliza el casillero."""
+    data = {}
     if mode in ('gemini', 'openai', 'claude'):
-        data = read_label_ai(bgr_image, mode, keys)
-        if data and not data.get('_error'):
-            return data
-    return read_label_offline(bgr_image)
+        data = read_label_ai(bgr_image, mode, keys, prefix)
+        if not data or data.get('_error'):
+            off = read_label_offline(bgr_image)
+            if data.get('_error'):
+                off.setdefault('_error', data['_error'])
+            data = off
+    else:
+        data = read_label_offline(bgr_image)
+    # Normaliza casillero con el prefijo del courier (excluye ZIP/dirección Miami).
+    raw = data.get('_raw', '')
+    data['casillero'] = clean_casillero(data.get('casillero', ''), prefix, raw)
+    return data

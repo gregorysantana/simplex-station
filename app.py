@@ -15,7 +15,7 @@ CFG = {k: os.getenv(k, '') for k in (
     'SIMPLEX_URL', 'STATION_TOKEN', 'CAMERA_INDEX', 'AI_MODE',
     'GEMINI_API_KEY', 'GEMINI_MODEL', 'OPENAI_API_KEY', 'OPENAI_MODEL',
     'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'SCALE_VENDOR_ID', 'SCALE_PRODUCT_ID',
-    'LABEL_PRINTER', 'PORT')}
+    'LABEL_PRINTER', 'PORT', 'CASILLERO_PREFIX')}
 
 app = Flask(__name__)
 sx = Simplex(CFG['SIMPLEX_URL'] or 'https://simplex.do', CFG['STATION_TOKEN'])
@@ -47,8 +47,10 @@ def capture():
     fr = _decode_dataurl(data.get('image', ''))
     if fr is None:
         return jsonify(ok=False, message='sin imagen (permite la cámara en el navegador)')
-    tracking = vision.decode_barcode(fr)
-    label = vision.read_label(fr, CFG['AI_MODE'] or 'offline', CFG)
+    import re
+    prefix = CFG.get('CASILLERO_PREFIX') or 'H'
+    tracking = vision.decode_barcode(fr)  # tracking = código de barras (multi-formato)
+    label = vision.read_label(fr, CFG['AI_MODE'] or 'offline', CFG, prefix)
     out = {
         'ok': True,
         'tracking': tracking or '',
@@ -58,8 +60,10 @@ def capture():
         'supplier': label.get('supplier', ''),
         'ai_error': label.get('_error', ''),
     }
-    # Match de cliente por casillero/nombre.
-    q = out['casillero'] or out['recipient_name']
+    # Match de cliente: busca por los DÍGITOS del casillero (el servidor rellena ceros → H-000025),
+    # o por nombre si no hubo casillero.
+    digits = re.sub(r'\D', '', out['casillero'])
+    q = digits or out['recipient_name'] or out['casillero']
     if q:
         r = sx.client_search(q)
         out['client_matches'] = (r or {}).get('data', [])
