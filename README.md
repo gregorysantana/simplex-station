@@ -5,16 +5,24 @@ barras para el tracking, IA/OCR para nombre/casillero/contenido) + balanza PS60 
 empujando a Simplex por **token de estación**. Funciona **online** (IA en la nube) u **offline** (OCR local).
 
 ## Instalar
+
+### Windows (una línea, PowerShell)
+```powershell
+git clone https://github.com/gregorysantana/simplex-station.git; cd simplex-station; py -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt; copy .env.example .env; notepad .env; python app.py
+```
+Edita `.env` (pon `STATION_TOKEN`, `AI_MODE`, `OPENAI_API_KEY`) cuando se abra el Notepad, guárdalo y cierra. Abre http://localhost:8777. La **cámara se elige en la página** (menú arriba del video) y el navegador pedirá permiso.
+
+### macOS / Linux
 ```bash
 cd simplex-station
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# IA nube (elige uno):  pip install google-generativeai   (o openai / anthropic)
-# OCR offline:          pip install paddleocr paddlepaddle
-cp .env.example .env    # y completa SIMPLEX_URL, STATION_TOKEN, AI_MODE, API keys
-python app.py
-# abre http://localhost:8777
+cp .env.example .env    # completa SIMPLEX_URL, STATION_TOKEN, AI_MODE, OPENAI_API_KEY
+python app.py           # http://localhost:8777
 ```
+
+> La cámara la maneja el **navegador** (getUserMedia): se elige en el selector de la página
+> y el navegador pide permiso. No depende de permisos del SO al proceso Python.
 
 ## Flujo
 1. **📸 Capturar**: toma el frame → tracking del **código de barras** + IA/OCR → nombre/casillero/contenido.

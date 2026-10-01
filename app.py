@@ -21,48 +21,18 @@ app = Flask(__name__)
 sx = Simplex(CFG['SIMPLEX_URL'] or 'https://simplex.do', CFG['STATION_TOKEN'])
 
 
-class Camera:
-    """Captura en hilo; expone el último frame para MJPEG y /capture."""
-    def __init__(self, index=0):
-        self.index = index
-        self.cap = None
-        self.frame = None
-        self.lock = threading.Lock()
-        self.run = True
-        threading.Thread(target=self._loop, daemon=True).start()
-
-    def _loop(self):
-        import cv2
-        while self.run:
-            if self.cap is None:
-                self.cap = cv2.VideoCapture(self.index)
-                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            ok, fr = self.cap.read()
-            if ok:
-                with self.lock:
-                    self.frame = fr
-            else:
-                time.sleep(0.1)
-            time.sleep(0.03)
-
-    def get(self):
-        with self.lock:
-            return None if self.frame is None else self.frame.copy()
-
-
-cam = Camera(int(CFG['CAMERA_INDEX'] or 0))
-
-
-def mjpeg():
-    import cv2
-    while True:
-        fr = cam.get()
-        if fr is not None:
-            ok, buf = cv2.imencode('.jpg', fr)
-            if ok:
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n')
-        time.sleep(0.05)
+def _decode_dataurl(dataurl):
+    """Convierte un data:image/...;base64,XXXX a imagen BGR (OpenCV). None si falla."""
+    import base64, numpy as np, cv2
+    if not dataurl:
+        return None
+    try:
+        b64 = dataurl.split(',', 1)[1] if ',' in dataurl else dataurl
+        raw = base64.b64decode(b64)
+        arr = np.frombuffer(raw, np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return None
 
 
 @app.route('/')
@@ -70,17 +40,13 @@ def index():
     return render_template('index.html', cfg={'ai_mode': CFG['AI_MODE'] or 'offline'})
 
 
-@app.route('/video')
-def video():
-    return Response(mjpeg(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-
 @app.route('/api/capture', methods=['POST'])
 def capture():
-    """Lee el frame actual: barcode (tracking) + IA/OCR (nombre/casillero/contenido)."""
-    fr = cam.get()
+    """Recibe la foto del navegador: barcode (tracking) + IA/OCR (nombre/casillero/contenido)."""
+    data = request.json or {}
+    fr = _decode_dataurl(data.get('image', ''))
     if fr is None:
-        return jsonify(ok=False, message='sin cámara')
+        return jsonify(ok=False, message='sin imagen (permite la cámara en el navegador)')
     tracking = vision.decode_barcode(fr)
     label = vision.read_label(fr, CFG['AI_MODE'] or 'offline', CFG)
     out = {

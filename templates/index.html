@@ -10,11 +10,16 @@
 <div class="max-w-6xl mx-auto p-4">
   <h1 class="text-2xl font-bold mb-3">Estación · Entrada de paquetes <span class="text-xs text-slate-400">(IA: {{ cfg.ai_mode }})</span></h1>
   <div class="grid md:grid-cols-2 gap-4">
-    <!-- Cámara -->
+    <!-- Cámara (del navegador) -->
     <div class="bg-white rounded-xl shadow p-3">
-      <img src="/video" class="w-full rounded-lg bg-black" alt="cámara">
+      <div class="flex gap-2 mb-2">
+        <select id="camSel" class="flex-1 border rounded-lg px-2 py-1.5 text-sm"></select>
+        <button id="btnCamStart" class="bg-slate-700 text-white rounded-lg px-3 text-sm">Iniciar</button>
+      </div>
+      <video id="cam" autoplay playsinline muted class="w-full rounded-lg bg-black aspect-video"></video>
+      <canvas id="canvas" class="hidden"></canvas>
       <div class="flex gap-2 mt-3">
-        <button id="btnCapture" class="flex-1 bg-brand-600 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 font-semibold">📸 Capturar etiqueta</button>
+        <button id="btnCapture" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 font-semibold">📸 Capturar etiqueta</button>
         <button id="btnWeight" class="bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-4">⚖️ Pesar</button>
       </div>
       <div id="capMsg" class="text-xs text-slate-500 mt-2"></div>
@@ -60,32 +65,58 @@ const $ = id => document.getElementById(id);
 async function jget(u){ return (await fetch(u)).json(); }
 async function jpost(u,b){ return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json(); }
 
+// ── Cámara del navegador (con selector) ──
+let stream = null;
+async function listCams(){
+  try { await navigator.mediaDevices.getUserMedia({video:true}).then(s=>s.getTracks().forEach(t=>t.stop())); } catch(e){}
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+  $('camSel').innerHTML = devs.map((d,i)=>`<option value="${d.deviceId}">${d.label||('Cámara '+(i+1))}</option>`).join('');
+  if(devs.length) startCam(devs[0].deviceId);
+}
+async function startCam(deviceId){
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: deviceId?{deviceId:{exact:deviceId}}:{facingMode:'environment'}, audio:false });
+    $('cam').srcObject = stream;
+    $('capMsg').textContent = 'Cámara lista';
+  } catch(e){ $('capMsg').textContent = 'No se pudo abrir la cámara: '+e.message; }
+}
+$('btnCamStart').onclick = ()=> startCam($('camSel').value);
+$('camSel').onchange = ()=> startCam($('camSel').value);
+function grabFrame(){
+  const v=$('cam'), c=$('canvas');
+  if(!v.videoWidth) return null;
+  c.width=v.videoWidth; c.height=v.videoHeight;
+  c.getContext('2d').drawImage(v,0,0);
+  return c.toDataURL('image/jpeg',0.9);
+}
+
 async function loadContainers(){
-  const r = await jget('/api/containers');
-  const rows = (r&&r.data)||[];
+  const r = await jget('/api/containers'); const rows=(r&&r.data)||[];
   $('fContainer').innerHTML = '<option value="">— Sin —</option>' + rows.map(c=>`<option value="${c.id}">${c.code} (${c.pkg_count||0})</option>`).join('');
 }
-async function loadPending(){ const r = await jget('/api/pending'); $('pend').textContent = (r&&r.success)? (r.total+' (míos '+r.mine+')') : '—'; }
+async function loadPending(){ const r=await jget('/api/pending'); $('pend').textContent=(r&&r.success)?(r.total+' (míos '+r.mine+')'):'—'; }
 
 $('btnCapture').onclick = async () => {
-  $('capMsg').textContent = 'Leyendo…';
-  const r = await jpost('/api/capture',{});
-  if(!r.ok){ $('capMsg').textContent = r.message||'Error'; return; }
-  if(r.tracking) $('fTracking').value = r.tracking;
-  if(r.content) $('fContent').value = r.content;
-  if(r.supplier) $('fSupplier').value = r.supplier;
-  $('capMsg').textContent = 'Tracking: '+(r.tracking||'—')+(r.ai_error?(' · IA: '+r.ai_error):'');
-  const m = r.client_matches||[];
-  if(m.length===1){ pickClient(m[0]); }
-  else if(m.length>1){ showResults(m); }
-  else if(r.casillero||r.recipient_name){ $('fClientSearch').value = r.casillero||r.recipient_name; }
+  const img = grabFrame();
+  if(!img){ $('capMsg').textContent='Cámara no iniciada'; return; }
+  $('capMsg').textContent='Leyendo…';
+  const r = await jpost('/api/capture',{image:img});
+  if(!r.ok){ $('capMsg').textContent=r.message||'Error'; return; }
+  if(r.tracking) $('fTracking').value=r.tracking;
+  if(r.content) $('fContent').value=r.content;
+  if(r.supplier) $('fSupplier').value=r.supplier;
+  $('capMsg').textContent='Tracking: '+(r.tracking||'—')+(r.ai_error?(' · IA: '+r.ai_error):'');
+  const m=r.client_matches||[];
+  if(m.length===1) pickClient(m[0]); else if(m.length>1) showResults(m);
+  else if(r.casillero||r.recipient_name) $('fClientSearch').value=r.casillero||r.recipient_name;
 };
 
 $('btnWeight').onclick = async () => {
   $('capMsg').textContent='Pesando…';
-  const r = await jget('/api/weight');
-  if(r.ok){ $('fWeight').value = Number(r.weight_lb).toFixed(2); $('capMsg').textContent='Peso '+(r.stable?'estable':'')+': '+r.weight_lb+' lb'; }
-  else $('capMsg').textContent = 'Balanza: '+(r.message||'error');
+  const r=await jget('/api/weight');
+  if(r.ok){ $('fWeight').value=Number(r.weight_lb).toFixed(2); $('capMsg').textContent='Peso '+(r.stable?'estable':'')+': '+r.weight_lb+' lb'; }
+  else $('capMsg').textContent='Balanza: '+(r.message||'error');
 };
 
 function showResults(rows){
@@ -105,7 +136,7 @@ $('btnSubmit').onclick = async () => {
   if(!$('fClientId').value){ $('subMsg').textContent='Selecciona un cliente'; $('subMsg').className='text-sm text-rose-600'; return; }
   if(!(parseFloat($('fWeight').value)>0)){ $('subMsg').textContent='Peso debe ser > 0'; $('subMsg').className='text-sm text-rose-600'; return; }
   $('subMsg').textContent='Guardando…'; $('subMsg').className='text-sm text-slate-500';
-  const r = await jpost('/api/submit',{
+  const r=await jpost('/api/submit',{
     client_id:$('fClientId').value, tracking_number:$('fTracking').value.trim(), carrier:$('fCarrier').value.trim(),
     content:$('fContent').value.trim(), supplier:$('fSupplier').value.trim(), packaging_type_id:$('fPackaging').value||0,
     fob:$('fFob').value||0, weight_lb:$('fWeight').value, container_id:$('fContainer').value||0, print:$('fPrint').checked,
@@ -116,7 +147,7 @@ $('btnSubmit').onclick = async () => {
   } else { $('subMsg').textContent=r.message||'Error'; $('subMsg').className='text-sm text-rose-600'; }
 };
 
-loadContainers(); loadPending();
+listCams(); loadContainers(); loadPending();
 </script>
 </body>
 </html>

@@ -4,10 +4,9 @@ requests>=2.31
 python-dotenv>=1.0
 numpy>=1.26
 pillow>=10.0
-opencv-python>=4.9        # cámara
 
-# Código de barras (tracking) — robusto en 1D
-zxing-cpp>=2.2
+# Visión: OpenCV con módulos extra (incluye detector de código de barras)
+opencv-contrib-python>=4.9
 
 # Balanza USB PS60 (HID POS)
 hidapi>=0.14
@@ -15,11 +14,10 @@ hidapi>=0.14
 # Etiqueta (Code128)
 python-barcode>=0.15
 
-# IA en la nube (opcional — modo online). Instala el que uses:
-# google-generativeai>=0.8      # Gemini
-# openai>=1.40                  # GPT
-# anthropic>=0.34               # Claude
+# IA de lectura (nube). OpenAI por defecto; Gemini/Claude opcionales.
+openai>=1.40
+# google-generativeai>=0.8     # para AI_MODE=gemini
+# anthropic>=0.34              # para AI_MODE=claude
 
-# OCR offline (opcional — modo sin internet). Pesado:
-# paddleocr>=2.7
-# paddlepaddle>=2.6
+# OCR offline (opcional, pesado):
+# easyocr>=1.7

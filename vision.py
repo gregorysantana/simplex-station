@@ -7,30 +7,60 @@
 import os, io, json, base64, re
 
 # ---- Código de barras (zxing-cpp) ----
+def _good(txt, fmt=''):
+    txt = (txt or '').strip()
+    if not txt or len(txt) < 8:
+        return None
+    if 'QR' in (fmt or '').upper():
+        return None
+    return txt
+
 def decode_barcode(bgr_image):
-    """Devuelve el mejor tracking 1D del frame (prueba rotaciones). None si no hay."""
+    """Devuelve el mejor tracking 1D del frame (prueba rotaciones). None si no hay.
+    Usa zxing-cpp si está disponible; si no, el detector de barcode de OpenCV."""
+    import cv2
+    rots = (None, cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180)
+
+    # 1) zxing-cpp (si está instalado)
     try:
         import zxingcpp
-        import numpy as np, cv2
+        for rot in rots:
+            img = bgr_image if rot is None else cv2.rotate(bgr_image, rot)
+            try:
+                for r in zxingcpp.read_barcodes(img):
+                    t = _good(r.text, str(getattr(r, 'format', '')))
+                    if t:
+                        return t
+            except Exception:
+                pass
     except Exception:
-        return None
-    best = None
-    for rot in (None, cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180):
-        img = bgr_image if rot is None else cv2.rotate(bgr_image, rot)
-        try:
-            results = zxingcpp.read_barcodes(img)
-        except Exception:
-            results = []
-        for r in results:
-            txt = (r.text or '').strip()
-            fmt = str(getattr(r, 'format', ''))
-            if not txt:
+        pass
+
+    # 2) OpenCV barcode (opencv-contrib)
+    try:
+        det = cv2.barcode.BarcodeDetector()
+        for rot in rots:
+            img = bgr_image if rot is None else cv2.rotate(bgr_image, rot)
+            try:
+                res = det.detectAndDecode(img)
+            except Exception:
+                res = None
+            if not res:
                 continue
-            # Preferir 1D (tracking); descartar QR y cadenas muy cortas.
-            if 'QR' in fmt or len(txt) < 8:
-                continue
-            return txt
-    return best
+            # API varía: (ok, infos, types, pts) o (infos, types, pts)
+            infos = None
+            if isinstance(res, tuple):
+                if len(res) == 4:
+                    infos = res[1]
+                elif len(res) == 3:
+                    infos = res[0]
+            for s in (infos or []):
+                t = _good(s)
+                if t:
+                    return t
+    except Exception:
+        pass
+    return None
 
 
 # ---- IA en la nube: devuelve dict estructurado ----
